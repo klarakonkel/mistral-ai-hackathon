@@ -8,6 +8,8 @@ import type {
 const BASE_URL =
   process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
 
+const API_KEY = process.env.NEXT_PUBLIC_API_KEY ?? "";
+
 // ─── Generic fetch helper ─────────────────────────────────────────────────────
 
 async function apiFetch<T>(
@@ -15,9 +17,11 @@ async function apiFetch<T>(
   options: RequestInit = {}
 ): Promise<T> {
   const url = `${BASE_URL}/api${path}`;
+  const authHeader = API_KEY ? { Authorization: `Bearer ${API_KEY}` } : {};
   const res = await fetch(url, {
     headers: {
       "Content-Type": "application/json",
+      ...authHeader,
       ...options.headers,
     },
     ...options,
@@ -34,6 +38,7 @@ async function apiFetch<T>(
     throw new Error(`API error ${res.status}: ${detail}`);
   }
 
+  if (res.status === 204) return undefined as T;
   return res.json() as Promise<T>;
 }
 

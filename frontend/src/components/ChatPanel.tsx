@@ -45,12 +45,23 @@ export default function ChatPanel({
   const bottomRef = useRef<HTMLDivElement>(null);
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const audioChunksRef = useRef<Blob[]>([]);
+  const streamRef = useRef<MediaStream | null>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
 
   // Auto-scroll to latest message
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages, isProcessing]);
+
+  // Cleanup MediaRecorder and mic on unmount
+  useEffect(() => {
+    return () => {
+      if (mediaRecorderRef.current?.state === "recording") {
+        mediaRecorderRef.current.stop();
+      }
+      streamRef.current?.getTracks().forEach((t) => t.stop());
+    };
+  }, []);
 
   // ─── Text send ──────────────────────────────────────────────────────────────
 
@@ -114,9 +125,11 @@ export default function ChatPanel({
   // ─── Voice recording ────────────────────────────────────────────────────────
 
   const startRecording = useCallback(async () => {
+    if (isProcessing) return; // Prevent recording while processing
     setRecordingError(null);
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      streamRef.current = stream;
       const recorder = new MediaRecorder(stream, {
         mimeType: MediaRecorder.isTypeSupported("audio/webm;codecs=opus")
           ? "audio/webm;codecs=opus"
@@ -130,6 +143,7 @@ export default function ChatPanel({
 
       recorder.onstop = async () => {
         stream.getTracks().forEach((t) => t.stop());
+        streamRef.current = null;
         const blob = new Blob(audioChunksRef.current, { type: "audio/webm" });
         setIsProcessing(true);
         try {
@@ -152,7 +166,7 @@ export default function ChatPanel({
       const msg = err instanceof Error ? err.message : String(err);
       setRecordingError(`Mic error: ${msg}`);
     }
-  }, [sendMessage, setIsProcessing]);
+  }, [isProcessing, sendMessage, setIsProcessing]);
 
   const stopRecording = useCallback(() => {
     if (mediaRecorderRef.current?.state === "recording") {
@@ -194,6 +208,12 @@ export default function ChatPanel({
       onNewMessage(xpMsg);
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
+      // Signal execution failure to parent so UI doesn't stay stuck in "running"
+      onExecutionComplete({
+        execution: { status: "failed", step_results: {} },
+        xp_result: { xp_earned: 0 },
+        character_state: undefined as never,
+      } as Awaited<ReturnType<typeof api.executeWorkflow>>);
       const errMsg: Message = {
         id: crypto.randomUUID(),
         role: "assistant",

@@ -13,7 +13,7 @@ class Settings(BaseSettings):
     wandb_project: str = "kotoflow"
     ft_model_name: Optional[str] = None
     kotoflow_api_key: str = ""
-    cors_origins: list[str] = ["http://localhost:3000"]
+    cors_origins: list[str] = ["http://localhost:3000", "https://localhost:3000"]
     allowed_domains: list[str] = [
         "api.mistral.ai",
         "api.elevenlabs.io",

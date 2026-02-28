@@ -1,5 +1,6 @@
 import logging
 import secrets
+import time
 from typing import Optional
 from uuid import uuid4
 
@@ -31,7 +32,9 @@ _workflow_generator: Optional[WorkflowGenerator] = None
 _workflow_executor: Optional[WorkflowExecutor] = None
 _voice_service: Optional[VoiceService] = None
 _character_service: Optional[CharacterService] = None
-_sessions: dict[str, OrchestratorAgent] = {}
+_sessions: dict[str, tuple[OrchestratorAgent, float]] = {}
+_SESSION_TTL = 3600  # 1 hour
+_MAX_SESSIONS = 1000
 
 
 def _get_settings() -> Settings:
@@ -53,9 +56,22 @@ def _verify_api_key(credentials: Optional[HTTPAuthorizationCredentials] = Depend
 
 def _get_orchestrator(session_id: str) -> OrchestratorAgent:
     settings = _get_settings()
+    now = time.time()
+
+    # Evict expired sessions
+    expired = [sid for sid, (_, ts) in _sessions.items() if now - ts > _SESSION_TTL]
+    for sid in expired:
+        del _sessions[sid]
+
     if session_id not in _sessions:
-        _sessions[session_id] = OrchestratorAgent(settings)
-    return _sessions[session_id]
+        if len(_sessions) >= _MAX_SESSIONS:
+            raise HTTPException(status_code=429, detail="Too many active sessions")
+        _sessions[session_id] = (OrchestratorAgent(settings), now)
+    else:
+        agent, _ = _sessions[session_id]
+        _sessions[session_id] = (agent, now)  # Refresh timestamp
+
+    return _sessions[session_id][0]
 
 
 def _get_services():
@@ -182,7 +198,8 @@ async def chat(request: ChatRequest):
 @router.post("/chat/reset", dependencies=[Depends(_verify_api_key)])
 async def chat_reset(session_id: str = ""):
     if session_id and session_id in _sessions:
-        _sessions[session_id].reset()
+        agent, _ = _sessions[session_id]
+        agent.reset()
         del _sessions[session_id]
     return {"status": "reset"}
 

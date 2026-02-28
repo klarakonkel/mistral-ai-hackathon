@@ -1,3 +1,4 @@
+import asyncio
 import base64
 import json
 import logging
@@ -20,7 +21,7 @@ router = APIRouter()
 MAX_WS_AUDIO_BYTES = 5 * 1024 * 1024  # 5 MB
 MAX_WS_TEXT_BYTES = 16 * 1024  # 16 KB
 MAX_CONNECTIONS = 50
-_active_connections = 0
+_connection_semaphore = asyncio.Semaphore(MAX_CONNECTIONS)
 
 
 def _init_services():
@@ -83,8 +84,6 @@ async def _handle_chat(text: str, services: dict, websocket: WebSocket) -> None:
 
 @router.websocket("/voice")
 async def websocket_voice(websocket: WebSocket, token: str = Query(default="")):
-    global _active_connections
-
     # Auth check
     try:
         settings = Settings()
@@ -97,19 +96,20 @@ async def websocket_voice(websocket: WebSocket, token: str = Query(default="")):
             await websocket.close(code=4001)
             return
 
-    # Connection limit
-    if _active_connections >= MAX_CONNECTIONS:
+    # Connection limit (concurrency-safe via semaphore)
+    try:
+        await asyncio.wait_for(_connection_semaphore.acquire(), timeout=0.01)
+    except (asyncio.TimeoutError, Exception):
         await websocket.close(code=1013)
         return
 
     await websocket.accept()
-    _active_connections += 1
 
     services = _init_services()
     if not services:
         await websocket.send_json({"type": "error", "data": "Services not available"})
         await websocket.close(code=1000)
-        _active_connections -= 1
+        _connection_semaphore.release()
         return
 
     try:
@@ -163,4 +163,4 @@ async def websocket_voice(websocket: WebSocket, token: str = Query(default="")):
         except Exception:
             pass
     finally:
-        _active_connections -= 1
+        _connection_semaphore.release()

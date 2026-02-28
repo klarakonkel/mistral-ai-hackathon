@@ -28,6 +28,9 @@ COMPOSIO_ACTIONS = frozenset([
 
 EXECUTION_TIMEOUT = 120.0  # 2 minutes total
 MAX_LLM_CONTENT_LENGTH = 10000  # chars
+MAX_RESPONSE_BYTES = 1_000_000  # 1 MB
+
+logger = __import__("logging").getLogger(__name__)
 
 
 class WorkflowExecutor:
@@ -95,7 +98,8 @@ class WorkflowExecutor:
         if handler:
             return await handler(step, context)
 
-        return {"status": "skipped", "action": step.action}
+        logger.warning("Unknown action skipped: %s (step %s)", step.action, step.id)
+        return {"status": "error", "error": f"Unknown action: {step.action}"}
 
     async def _execute_composio(self, step: WorkflowStep, context: dict) -> dict:
         params = self._interpolate_params(step.params, context)
@@ -123,6 +127,7 @@ class WorkflowExecutor:
             body = params.get("body")
 
             async with httpx.AsyncClient(timeout=10.0, follow_redirects=False) as client:
+                # Check content-length before downloading
                 if method == "GET":
                     response = await client.get(url, headers=headers)
                 elif method == "POST":
@@ -133,6 +138,9 @@ class WorkflowExecutor:
                     response = await client.delete(url, headers=headers)
                 else:
                     return {"status": "error", "error": "Unsupported method"}
+
+                if len(response.content) > MAX_RESPONSE_BYTES:
+                    return {"status": "error", "error": "Response too large"}
 
                 return {
                     "status": "success",
@@ -227,6 +235,15 @@ class WorkflowExecutor:
 
         # Exact domain match
         if hostname not in self.allowed_domains:
+            return False
+
+        # DNS rebinding protection: resolve and verify IPs are not private
+        try:
+            for addr_info in socket.getaddrinfo(hostname, 443, socket.AF_UNSPEC, socket.SOCK_STREAM):
+                ip = ipaddress.ip_address(addr_info[4][0])
+                if ip.is_private or ip.is_loopback or ip.is_reserved or ip.is_link_local:
+                    return False
+        except socket.gaierror:
             return False
 
         return True

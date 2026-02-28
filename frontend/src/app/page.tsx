@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useState, useCallback, useRef } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import ChatPanel from "@/components/ChatPanel";
 import WorkflowVisualizer from "@/components/WorkflowVisualizer";
@@ -162,6 +162,7 @@ export default function Home() {
   const [xpToast, setXpToast] = useState<{ xp: number; levelUp: boolean; newLevel?: number } | null>(null);
   const [apiHealth, setApiHealth] = useState<"unknown" | "ok" | "error">("unknown");
   const [showOnboarding, setShowOnboarding] = useState(false);
+  const xpToastTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // ─── Initial load ──────────────────────────────────────────────────────────
 
@@ -221,15 +222,16 @@ export default function Home() {
     (result: Awaited<ReturnType<typeof api.executeWorkflow>>) => {
       setExecutionStatus(result.execution.status);
       setStepResults(result.execution.step_results ?? {});
-      setCharacterState(result.character_state);
+      if (result.character_state) setCharacterState(result.character_state);
 
       if (result.xp_result?.xp_earned) {
+        if (xpToastTimerRef.current) clearTimeout(xpToastTimerRef.current);
         setXpToast({
           xp: result.xp_result.xp_earned,
           levelUp: result.xp_result.level_up ?? false,
           newLevel: result.xp_result.new_level,
         });
-        setTimeout(() => setXpToast(null), 3500);
+        xpToastTimerRef.current = setTimeout(() => setXpToast(null), 3500);
       }
     },
     []

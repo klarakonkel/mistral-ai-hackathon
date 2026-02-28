@@ -1,5 +1,5 @@
 ## AI AGENCY
-# from a conversation to an automation in seconds (for non-technical users)
+### from a conversation to an automation in seconds (for non-technical users)
 
 ## Problem
 

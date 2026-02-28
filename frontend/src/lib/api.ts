@@ -1,0 +1,136 @@
+import type {
+  ChatResponse,
+  CharacterState,
+  WorkflowDefinition,
+  WorkflowExecuteResponse,
+} from "@/types";
+
+const BASE_URL =
+  process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
+
+// ─── Generic fetch helper ─────────────────────────────────────────────────────
+
+async function apiFetch<T>(
+  path: string,
+  options: RequestInit = {}
+): Promise<T> {
+  const url = `${BASE_URL}/api${path}`;
+  const res = await fetch(url, {
+    headers: {
+      "Content-Type": "application/json",
+      ...options.headers,
+    },
+    ...options,
+  });
+
+  if (!res.ok) {
+    let detail = res.statusText;
+    try {
+      const body = await res.json();
+      detail = body.detail ?? detail;
+    } catch {
+      // ignore
+    }
+    throw new Error(`API error ${res.status}: ${detail}`);
+  }
+
+  return res.json() as Promise<T>;
+}
+
+// ─── Chat ─────────────────────────────────────────────────────────────────────
+
+export async function chat(message: string): Promise<ChatResponse> {
+  return apiFetch<ChatResponse>("/chat", {
+    method: "POST",
+    body: JSON.stringify({ message }),
+  });
+}
+
+export async function resetChat(): Promise<{ status: string }> {
+  return apiFetch<{ status: string }>("/chat/reset", {
+    method: "POST",
+    body: JSON.stringify({}),
+    headers: { "Content-Type": "application/json" },
+  });
+}
+
+// ─── Workflow ─────────────────────────────────────────────────────────────────
+
+export async function executeWorkflow(
+  workflow: WorkflowDefinition
+): Promise<WorkflowExecuteResponse> {
+  return apiFetch<WorkflowExecuteResponse>("/workflow/execute", {
+    method: "POST",
+    body: JSON.stringify({ workflow }),
+  });
+}
+
+export interface FeedbackPayload {
+  user_request: string;
+  workflow: WorkflowDefinition;
+  feedback_type: "accept" | "reject" | "edit";
+  edited?: boolean;
+}
+
+export async function submitFeedback(
+  data: FeedbackPayload
+): Promise<{ status: string }> {
+  return apiFetch<{ status: string }>("/workflow/feedback", {
+    method: "POST",
+    body: JSON.stringify(data),
+  });
+}
+
+// ─── Character ────────────────────────────────────────────────────────────────
+
+export async function getCharacter(): Promise<CharacterState> {
+  return apiFetch<CharacterState>("/character");
+}
+
+// ─── Voice ───────────────────────────────────────────────────────────────────
+
+export async function transcribeAudio(audioBlob: Blob): Promise<string> {
+  const form = new FormData();
+  form.append("file", audioBlob, "recording.webm");
+
+  const url = `${BASE_URL}/api/voice/transcribe`;
+  const res = await fetch(url, {
+    method: "POST",
+    body: form,
+  });
+
+  if (!res.ok) {
+    let detail = res.statusText;
+    try {
+      const body = await res.json();
+      detail = body.detail ?? detail;
+    } catch {
+      // ignore
+    }
+    throw new Error(`Transcription error ${res.status}: ${detail}`);
+  }
+
+  const data = await res.json();
+  return data.text as string;
+}
+
+export async function synthesizeVoice(text: string): Promise<Blob> {
+  const url = `${BASE_URL}/api/voice/synthesize`;
+  const res = await fetch(url, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ text }),
+  });
+
+  if (!res.ok) {
+    throw new Error(`Synthesis error ${res.status}: ${res.statusText}`);
+  }
+
+  return res.blob();
+}
+
+// ─── Health ───────────────────────────────────────────────────────────────────
+
+export async function checkHealth(): Promise<{ status: string }> {
+  return apiFetch<{ status: string }>("/health");
+}

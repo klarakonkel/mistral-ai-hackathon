@@ -1,0 +1,323 @@
+@import "tailwindcss";
+
+/* ─── Base theme ─────────────────────────────────────────────────────────── */
+
+:root {
+  --color-bg:        #030712;   /* gray-950 */
+  --color-panel:     #111827;   /* gray-900 — slightly lighter for depth */
+  --color-border:    #1f2937;   /* gray-800 — subtler borders */
+  --color-accent:    #6366f1;   /* indigo-500 */
+  --color-accent-hi: #818cf8;   /* indigo-400 */
+  --color-purple:    #a855f7;
+  --color-green:     #22c55e;
+  --color-orange:    #f97316;
+  --color-blue:      #3b82f6;
+  --transition-base: 150ms cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+html,
+body {
+  background-color: var(--color-bg);
+  color: #f9fafb;
+  font-family: 'Inter', system-ui, sans-serif;
+  height: 100%;
+  margin: 0;
+  padding: 0;
+}
+
+/* Subtle gradient background for the whole page */
+body::before {
+  content: '';
+  position: fixed;
+  inset: 0;
+  background:
+    radial-gradient(ellipse 80% 50% at 20% -10%, rgba(99, 102, 241, 0.08) 0%, transparent 60%),
+    radial-gradient(ellipse 60% 40% at 80% 110%, rgba(168, 85, 247, 0.06) 0%, transparent 60%);
+  pointer-events: none;
+  z-index: 0;
+}
+
+/* Ensure content sits above the gradient */
+body > * { position: relative; z-index: 1; }
+
+/* ─── Scrollbar ──────────────────────────────────────────────────────────── */
+
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb {
+  background: var(--color-border);
+  border-radius: 9999px;
+}
+::-webkit-scrollbar-thumb:hover { background: #374151; }
+
+/* ─── Global transition defaults ─────────────────────────────────────────── */
+
+button, a, input, textarea, select {
+  transition: background-color var(--transition-base),
+              border-color var(--transition-base),
+              color var(--transition-base),
+              box-shadow var(--transition-base),
+              opacity var(--transition-base),
+              transform var(--transition-base);
+}
+
+button:hover:not(:disabled) {
+  filter: brightness(1.08);
+}
+
+button:active:not(:disabled) {
+  transform: scale(0.97);
+}
+
+/* ─── XP bar ─────────────────────────────────────────────────────────────── */
+
+.xp-bar-fill {
+  transition: width 0.8s cubic-bezier(0.4, 0, 0.2, 1);
+  background: linear-gradient(90deg, var(--color-accent), var(--color-purple));
+}
+
+/* ─── Level-up flash ─────────────────────────────────────────────────────── */
+
+@keyframes levelUpFlash {
+  0%   { box-shadow: 0 0 0 0 rgba(99, 102, 241, 0.8); }
+  50%  { box-shadow: 0 0 32px 16px rgba(99, 102, 241, 0.5); }
+  100% { box-shadow: 0 0 0 0 rgba(99, 102, 241, 0); }
+}
+
+.level-up-flash {
+  animation: levelUpFlash 1s ease-out;
+}
+
+/* ─── Voice recording pulse ──────────────────────────────────────────────── */
+
+@keyframes recordPulse {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(239, 68, 68, 0.7); }
+  50%       { box-shadow: 0 0 0 16px rgba(239, 68, 68, 0); }
+}
+
+.recording-pulse {
+  animation: recordPulse 1.2s ease-in-out infinite;
+}
+
+/* ─── Workflow node colors ───────────────────────────────────────────────── */
+
+.node-composio { border-color: var(--color-green) !important; }
+.node-llm       { border-color: var(--color-blue)   !important; }
+.node-api       { border-color: var(--color-orange)  !important; }
+.node-browser   { border-color: var(--color-purple)  !important; }
+.node-default   { border-color: var(--color-accent)  !important; }
+
+.node-active {
+  box-shadow: 0 0 16px 4px rgba(99, 102, 241, 0.6);
+}
+
+/* ─── Character avatar ───────────────────────────────────────────────────── */
+
+.avatar-egg      { filter: hue-rotate(0deg);   }
+.avatar-hatchling{ filter: hue-rotate(30deg);  }
+.avatar-creature { filter: hue-rotate(90deg);  }
+.avatar-evolved  { filter: hue-rotate(200deg); }
+.avatar-master   { filter: hue-rotate(270deg); }
+
+/* ─── Panel layout ───────────────────────────────────────────────────────── */
+
+.panel {
+  background: var(--color-panel);
+  border: 1px solid var(--color-border);
+  border-radius: 16px;
+  box-shadow: 0 1px 3px rgba(0,0,0,0.4), 0 1px 2px rgba(0,0,0,0.3);
+}
+
+.panel:hover {
+  border-color: #374151;
+  transition: border-color 300ms ease;
+}
+
+/* ─── React Flow canvas ──────────────────────────────────────────────────── */
+
+.react-flow__background { background: #0d1117; }
+.react-flow__controls button {
+  background: var(--color-panel);
+  border-color: var(--color-border);
+  color: #f9fafb;
+  border-radius: 8px;
+}
+.react-flow__controls button:hover {
+  background: #1f2937;
+}
+
+/* ─── Chat bubble ────────────────────────────────────────────────────────── */
+
+.bubble-user {
+  background: var(--color-accent);
+  border-radius: 18px 18px 4px 18px;
+}
+
+.bubble-assistant {
+  background: #1f2937;
+  border: 1px solid #374151;
+  border-radius: 18px 18px 18px 4px;
+}
+
+/* ─── Glow text for level ────────────────────────────────────────────────── */
+
+.glow-level {
+  text-shadow: 0 0 12px var(--color-accent-hi), 0 0 24px var(--color-accent);
+}
+
+/* ─── Skill badge ────────────────────────────────────────────────────────── */
+
+.skill-badge {
+  border: 1px solid var(--color-border);
+  border-radius: 10px;
+  padding: 6px 8px;
+  font-size: 0.7rem;
+  text-align: center;
+  transition: border-color 200ms ease, background 200ms ease, transform 150ms ease;
+  cursor: default;
+}
+
+.skill-badge:hover {
+  transform: translateY(-1px);
+  border-color: #374151;
+}
+
+.skill-badge.active {
+  border-color: var(--color-accent);
+  background: rgba(99, 102, 241, 0.12);
+}
+
+.skill-badge.active:hover {
+  background: rgba(99, 102, 241, 0.2);
+}
+
+/* ─── Tooltip ────────────────────────────────────────────────────────────── */
+
+.tooltip-wrapper {
+  position: relative;
+  display: inline-flex;
+  flex-direction: column;
+  align-items: center;
+}
+
+.tooltip-label {
+  font-size: 0.65rem;
+  color: #9ca3af;
+  margin-top: 3px;
+  line-height: 1;
+  user-select: none;
+  pointer-events: none;
+  letter-spacing: 0.01em;
+}
+
+/* ─── Suggestion chips ───────────────────────────────────────────────────── */
+
+.suggestion-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 5px 10px;
+  border-radius: 9999px;
+  border: 1px solid #374151;
+  background: #1f2937;
+  color: #d1d5db;
+  font-size: 0.72rem;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: border-color 150ms ease, background 150ms ease, color 150ms ease, transform 120ms ease;
+  user-select: none;
+}
+
+.suggestion-chip:hover {
+  border-color: var(--color-accent);
+  background: rgba(99, 102, 241, 0.12);
+  color: #e0e7ff;
+  transform: translateY(-1px);
+}
+
+.suggestion-chip:active {
+  transform: scale(0.97) translateY(0);
+}
+
+/* ─── Onboarding overlay ─────────────────────────────────────────────────── */
+
+.onboarding-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(3, 7, 18, 0.88);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  z-index: 100;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 16px;
+}
+
+.onboarding-card {
+  background: #111827;
+  border: 1px solid #374151;
+  border-radius: 20px;
+  padding: 36px 32px;
+  max-width: 440px;
+  width: 100%;
+  text-align: center;
+  box-shadow: 0 24px 64px rgba(0,0,0,0.6), 0 0 0 1px rgba(99,102,241,0.15);
+}
+
+.onboarding-step {
+  display: flex;
+  align-items: flex-start;
+  gap: 14px;
+  text-align: left;
+  padding: 12px 14px;
+  border-radius: 12px;
+  background: #1f2937;
+  border: 1px solid #374151;
+  transition: border-color 200ms ease;
+}
+
+.onboarding-step:hover {
+  border-color: var(--color-accent);
+}
+
+.onboarding-step-number {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  background: linear-gradient(135deg, var(--color-accent), var(--color-purple));
+  color: white;
+  font-size: 0.8rem;
+  font-weight: 700;
+  flex-shrink: 0;
+}
+
+/* ─── Empty state ────────────────────────────────────────────────────────── */
+
+.empty-state {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  padding: 24px;
+  text-align: center;
+}
+
+/* ─── Character greeting banner ──────────────────────────────────────────── */
+
+.character-greeting {
+  background: linear-gradient(135deg, rgba(99,102,241,0.12), rgba(168,85,247,0.08));
+  border: 1px solid rgba(99,102,241,0.25);
+  border-radius: 10px;
+  padding: 8px 12px;
+  font-size: 0.8rem;
+  color: #c7d2fe;
+  line-height: 1.4;
+}

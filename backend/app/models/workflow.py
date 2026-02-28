@@ -1,3 +1,4 @@
+import re
 from datetime import UTC, datetime
 from enum import Enum
 from typing import Optional
@@ -18,29 +19,109 @@ class TriggerType(str, Enum):
 
 class WorkflowTrigger(BaseModel):
     type: TriggerType
-    cron: Optional[str] = None
+    cron: Optional[str] = Field(None, pattern=r"^(\S+ ){4}\S+$")
     webhook_url: Optional[str] = None
+
+    @field_validator("webhook_url")
+    @classmethod
+    def validate_webhook_url(cls, v: Optional[str]) -> Optional[str]:
+        if v is None:
+            return v
+        if not v.startswith("https://"):
+            raise ValueError("webhook_url must use HTTPS")
+        if len(v) > 2048:
+            raise ValueError("webhook_url too long")
+        return v
+
+
+ALLOWED_ACTIONS = frozenset([
+    "api_call",
+    "browser_action",
+    "llm_summarize",
+    "web_search",
+    "send_email",
+    "create_calendar_event",
+    "list_emails",
+    "create_task",
+    "send_slack_message",
+    "post_social",
+    "send_message",
+    "slack_notify",
+    "discord_message",
+    "query_database",
+    "fetch_data",
+    "transform_data",
+    "aggregate_data",
+    "generate_image",
+    "create_content",
+    "write_document",
+    "schedule_task",
+    "delay_step",
+    "cron_schedule",
+    "deploy_service",
+    "monitor_system",
+    "configure_pipeline",
+])
 
 
 class WorkflowStep(BaseModel):
-    id: str
-    action: str
+    id: str = Field(..., pattern=r"^[a-zA-Z0-9_\-]{1,64}$")
+    action: str = Field(..., pattern=r"^[a-zA-Z0-9_]{1,64}$")
     params: dict = Field(default_factory=dict)
-    output: Optional[str] = None
+    output: Optional[str] = Field(None, pattern=r"^[a-zA-Z0-9_]{1,64}$")
     depends_on: Optional[list[str]] = None
+
+    @field_validator("action")
+    @classmethod
+    def validate_action(cls, v: str) -> str:
+        if v not in ALLOWED_ACTIONS:
+            raise ValueError(f"Unknown action: {v!r}")
+        return v
 
 
 class WorkflowDefinition(BaseModel):
-    name: str
-    description: Optional[str] = None
+    name: str = Field(..., max_length=200)
+    description: Optional[str] = Field(None, max_length=1000)
     trigger: WorkflowTrigger
     steps: list[WorkflowStep]
 
     @field_validator("steps")
     @classmethod
-    def validate_step_count(cls, v: list[WorkflowStep]) -> list[WorkflowStep]:
+    def validate_steps(cls, v: list[WorkflowStep]) -> list[WorkflowStep]:
         if len(v) > 10:
             raise ValueError("Workflow cannot have more than 10 steps")
+        if len(v) == 0:
+            raise ValueError("Workflow must have at least one step")
+        ids = [s.id for s in v]
+        if len(ids) != len(set(ids)):
+            raise ValueError("Step IDs must be unique")
+        id_set = set(ids)
+        for step in v:
+            if step.depends_on:
+                for dep in step.depends_on:
+                    if dep not in id_set:
+                        raise ValueError(f"Step {step.id!r} depends on unknown step {dep!r}")
+        # Cycle detection
+        graph = {s.id: set(s.depends_on or []) for s in v}
+        visited: set[str] = set()
+        rec_stack: set[str] = set()
+
+        def has_cycle(node: str) -> bool:
+            visited.add(node)
+            rec_stack.add(node)
+            for neighbor in graph.get(node, set()):
+                if neighbor not in visited:
+                    if has_cycle(neighbor):
+                        return True
+                elif neighbor in rec_stack:
+                    return True
+            rec_stack.discard(node)
+            return False
+
+        for node in graph:
+            if node not in visited:
+                if has_cycle(node):
+                    raise ValueError("Workflow steps contain a dependency cycle")
         return v
 
 

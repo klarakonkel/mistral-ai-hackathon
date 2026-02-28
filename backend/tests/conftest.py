@@ -17,6 +17,7 @@ def settings():
         composio_api_key="test-composio-key",
         wandb_api_key="",
         wandb_project="kotoflow-test",
+        kotoflow_api_key="",
         cors_origins=["http://localhost:3000"],
         allowed_domains=[
             "api.mistral.ai",

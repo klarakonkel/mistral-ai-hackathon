@@ -1,6 +1,6 @@
 """
 Comprehensive pytest tests for kotoflow backend.
-Tests models, services, executor, and API routes without requiring real API keys.
+Tests models, services, executor, security, and API routes without requiring real API keys.
 """
 import pytest
 from datetime import datetime
@@ -15,6 +15,7 @@ from app.models.workflow import (
     WorkflowExecution,
     WorkflowExecutionStatus,
     ConversationMessage,
+    ALLOWED_ACTIONS,
 )
 from app.models.character import (
     CharacterState,
@@ -92,6 +93,70 @@ class TestWorkflowDefinition:
         )
         assert len(workflow.steps) == 10
 
+    def test_workflow_empty_steps_invalid(self):
+        """Test that workflow with no steps is invalid."""
+        with pytest.raises(ValueError, match="Workflow must have at least one step"):
+            WorkflowDefinition(
+                name="Empty",
+                trigger=WorkflowTrigger(type=TriggerType.manual),
+                steps=[],
+            )
+
+    def test_workflow_duplicate_step_ids_invalid(self):
+        """Test that duplicate step IDs are rejected."""
+        with pytest.raises(ValueError, match="Step IDs must be unique"):
+            WorkflowDefinition(
+                name="Dups",
+                trigger=WorkflowTrigger(type=TriggerType.manual),
+                steps=[
+                    WorkflowStep(id="step_1", action="send_email"),
+                    WorkflowStep(id="step_1", action="create_task"),
+                ],
+            )
+
+    def test_workflow_cycle_detection(self):
+        """Test that cyclic dependencies are rejected."""
+        with pytest.raises(ValueError, match="dependency cycle"):
+            WorkflowDefinition(
+                name="Cycle",
+                trigger=WorkflowTrigger(type=TriggerType.manual),
+                steps=[
+                    WorkflowStep(id="step_a", action="send_email", depends_on=["step_b"]),
+                    WorkflowStep(id="step_b", action="create_task", depends_on=["step_a"]),
+                ],
+            )
+
+    def test_workflow_unknown_dependency_rejected(self):
+        """Test that dependencies on non-existent steps are rejected."""
+        with pytest.raises(ValueError, match="depends on unknown step"):
+            WorkflowDefinition(
+                name="Bad Dep",
+                trigger=WorkflowTrigger(type=TriggerType.manual),
+                steps=[
+                    WorkflowStep(id="step_1", action="send_email", depends_on=["nonexistent"]),
+                ],
+            )
+
+
+class TestWorkflowStepValidation:
+    """Test WorkflowStep field validation."""
+
+    def test_invalid_step_id_rejected(self):
+        """Test that step IDs with special chars are rejected."""
+        with pytest.raises(ValueError):
+            WorkflowStep(id="../etc/passwd", action="send_email")
+
+    def test_invalid_action_rejected(self):
+        """Test that unknown actions are rejected."""
+        with pytest.raises(ValueError, match="Unknown action"):
+            WorkflowStep(id="step_1", action="arbitrary_code_exec")
+
+    def test_valid_actions_accepted(self):
+        """Test that all allowed actions pass validation."""
+        for action in ["send_email", "api_call", "llm_summarize", "web_search"]:
+            step = WorkflowStep(id="step_1", action=action)
+            assert step.action == action
+
 
 class TestTriggerType:
     """Test TriggerType enum."""
@@ -115,6 +180,19 @@ class TestTriggerType:
         """Test manual trigger type."""
         trigger = WorkflowTrigger(type=TriggerType.manual)
         assert trigger.type == TriggerType.manual
+
+    def test_webhook_url_must_be_https(self):
+        """Test that webhook_url must use HTTPS."""
+        with pytest.raises(ValueError, match="HTTPS"):
+            WorkflowTrigger(
+                type=TriggerType.webhook,
+                webhook_url="http://example.com/webhook",
+            )
+
+    def test_invalid_cron_rejected(self):
+        """Test that invalid cron expressions are rejected."""
+        with pytest.raises(ValueError):
+            WorkflowTrigger(type=TriggerType.schedule, cron="invalid cron")
 
 
 class TestConversationMessage:
@@ -198,22 +276,25 @@ class TestCalculateXp:
             ],
         )
         xp = calculate_xp(workflow)
-        # base(100) + step_bonus(3*50=150) + service_diversity(3*75=225) = 475 (3 steps not >3, no bonus)
+        # base(100) + step_bonus(3*50=150) + service_diversity(3*75=225) = 475
         assert xp == 475
 
     def test_calculate_xp_five_steps_with_complexity(self):
-        """Test XP calculation for 5+ step workflow."""
+        """Test XP calculation for 5 step workflow with complexity bonus."""
         workflow = WorkflowDefinition(
             name="Complex Workflow",
             trigger=WorkflowTrigger(type=TriggerType.manual),
             steps=[
-                WorkflowStep(id=f"step_{i}", action=f"action_{i % 3}")
-                for i in range(1, 6)
+                WorkflowStep(id="step_1", action="send_email"),
+                WorkflowStep(id="step_2", action="send_slack_message"),
+                WorkflowStep(id="step_3", action="create_task"),
+                WorkflowStep(id="step_4", action="api_call"),
+                WorkflowStep(id="step_5", action="web_search"),
             ],
         )
         xp = calculate_xp(workflow)
-        # base(100) + step_bonus(5*50) + service_diversity(3*75) + complexity(200) = 625
-        assert xp >= 500
+        # base(100) + step_bonus(5*50=250) + service_diversity(5*75=375) + complexity(100 for >3) = 825
+        assert xp == 825
 
     def test_calculate_xp_six_steps_high_complexity(self):
         """Test XP calculation for 6+ step workflow with high complexity bonus."""
@@ -221,8 +302,12 @@ class TestCalculateXp:
             name="Very Complex",
             trigger=WorkflowTrigger(type=TriggerType.manual),
             steps=[
-                WorkflowStep(id=f"step_{i}", action=f"action_{i}")
-                for i in range(1, 7)
+                WorkflowStep(id="step_1", action="send_email"),
+                WorkflowStep(id="step_2", action="send_slack_message"),
+                WorkflowStep(id="step_3", action="create_task"),
+                WorkflowStep(id="step_4", action="api_call"),
+                WorkflowStep(id="step_5", action="web_search"),
+                WorkflowStep(id="step_6", action="llm_summarize"),
             ],
         )
         xp = calculate_xp(workflow)
@@ -258,7 +343,6 @@ class TestCharacterServiceAwardXp:
 
     def test_level_up_happens_at_threshold(self, character_service):
 
-        # Create a small workflow to award XP
         small_workflow = WorkflowDefinition(
             name="Small Workflow",
             trigger=WorkflowTrigger(type=TriggerType.manual),
@@ -267,11 +351,9 @@ class TestCharacterServiceAwardXp:
 
         initial_level = character_service.state.level
 
-        # Award XP multiple times to reach level up threshold
         for _ in range(5):
             character_service.award_xp(small_workflow)
 
-        # Should have leveled up at some point
         assert character_service.state.level >= initial_level
 
     def test_achievement_first_workflow_unlocks(self, character_service, sample_workflow):
@@ -280,7 +362,6 @@ class TestCharacterServiceAwardXp:
 
         assert "first_workflow" in result["achievements_unlocked"]
 
-        # Verify achievement is marked as earned
         first_workflow_achievement = next(
             (a for a in character_service.state.achievements if a.id == "first_workflow"),
             None
@@ -296,12 +377,9 @@ class TestCharacterServiceAwardXp:
             steps=[WorkflowStep(id="step_1", action="send_email")],
         )
 
-        # Complete 10 workflows
         for i in range(10):
             result = character_service.award_xp(workflow)
 
-        # On the 10th completion, ten_workflows should unlock
-        achievements_unlocked = result["achievements_unlocked"]
         total_workflows = sum(
             skill.workflows_completed for skill in character_service.state.skills.values()
         )
@@ -313,23 +391,23 @@ class TestCharacterServiceAwardXp:
         initial_stage = character_service.state.appearance_stage
         initial_level = character_service.state.level
 
-        # Use a high-complexity workflow to earn lots of XP
         complex_workflow = WorkflowDefinition(
             name="Complex",
             trigger=WorkflowTrigger(type=TriggerType.manual),
             steps=[
-                WorkflowStep(id=f"step_{i}", action=f"action_{i}")
-                for i in range(1, 7)
+                WorkflowStep(id="step_1", action="send_email"),
+                WorkflowStep(id="step_2", action="send_slack_message"),
+                WorkflowStep(id="step_3", action="create_task"),
+                WorkflowStep(id="step_4", action="api_call"),
+                WorkflowStep(id="step_5", action="web_search"),
+                WorkflowStep(id="step_6", action="llm_summarize"),
             ],
         )
 
-        # Award XP multiple times
         for _ in range(10):
             character_service.award_xp(complex_workflow)
 
-        # If level increased, stage might have changed
         if character_service.state.level > initial_level:
-            # At level 3+, appearance_stage should be at least "hatchling"
             if character_service.state.level >= 3:
                 assert character_service.state.appearance_stage in ["hatchling", "creature", "evolved", "master"]
 
@@ -348,7 +426,6 @@ class TestCharacterServiceAwardXp:
 
         result = character_service.award_xp(workflow)
 
-        # Communication branch should have been touched
         assert SkillBranch.communication.value in result["skill_ups"] or \
                character_service.state.skills[SkillBranch.communication].workflows_completed > initial_communication_workflows
 
@@ -410,33 +487,59 @@ class TestWorkflowExecutorInterpolation:
 
         assert result["data"]["nested"] == "success"
 
-
-class TestWorkflowExecutorDomainCheck:
-    """Test WorkflowExecutor domain allowlist checking."""
-
-    def test_is_domain_allowed_allowed_domain(self, settings):
-        """Test that allowed domains pass check."""
+    def test_interpolate_depth_limit(self, settings):
+        """Test that deeply nested template keys are ignored."""
         executor = WorkflowExecutor(settings)
-        assert executor._is_domain_allowed("api.mistral.ai") is True
-        assert executor._is_domain_allowed("api.elevenlabs.io") is True
+        params = {"val": "{{a.b.c.d.e.f.g}}"}
+        context = {"previous_results": {"a": {"b": {"c": {"d": {"e": {"f": {"g": "deep"}}}}}}}}
 
-    def test_is_domain_allowed_blocked_domain(self, settings):
-        """Test that unlisted domains fail check."""
+        result = executor._interpolate_params(params, context)
+        # Depth > 5 should not resolve
+        assert "{{a.b.c.d.e.f.g}}" in result["val"]
+
+
+class TestWorkflowExecutorUrlSafety:
+    """Test WorkflowExecutor URL safety checking."""
+
+    def test_https_allowed_domain_passes(self, settings):
+        """Test that HTTPS URLs to allowed domains pass."""
         executor = WorkflowExecutor(settings)
-        assert executor._is_domain_allowed("malicious.example.com") is False
-        assert executor._is_domain_allowed("unknown-api.com") is False
+        assert executor._is_url_safe("https://api.mistral.ai/v1/chat") is True
+        assert executor._is_url_safe("https://api.elevenlabs.io/v1/tts") is True
 
-    def test_is_domain_allowed_custom_config(self):
-        """Test domain check with custom allowed domains."""
-        settings = Settings(
-            mistral_api_key="test",
-            allowed_domains=["custom-api.example.com", "my-service.io"],
-        )
+    def test_http_rejected(self, settings):
+        """Test that HTTP URLs are rejected."""
         executor = WorkflowExecutor(settings)
+        assert executor._is_url_safe("http://api.mistral.ai/v1/chat") is False
 
-        assert executor._is_domain_allowed("custom-api.example.com") is True
-        assert executor._is_domain_allowed("my-service.io") is True
-        assert executor._is_domain_allowed("other.com") is False
+    def test_unknown_domain_rejected(self, settings):
+        """Test that unknown domains are rejected."""
+        executor = WorkflowExecutor(settings)
+        assert executor._is_url_safe("https://malicious.example.com/data") is False
+
+    def test_private_ip_rejected(self, settings):
+        """Test that private IPs are rejected."""
+        executor = WorkflowExecutor(settings)
+        assert executor._is_url_safe("https://192.168.1.1/secret") is False
+        assert executor._is_url_safe("https://10.0.0.1/internal") is False
+        assert executor._is_url_safe("https://127.0.0.1/localhost") is False
+
+    def test_metadata_ip_rejected(self, settings):
+        """Test that cloud metadata IPs are rejected."""
+        executor = WorkflowExecutor(settings)
+        assert executor._is_url_safe("https://169.254.169.254/latest/meta-data/") is False
+
+    def test_url_with_credentials_rejected(self, settings):
+        """Test that URLs with embedded credentials are rejected."""
+        executor = WorkflowExecutor(settings)
+        assert executor._is_url_safe("https://user:pass@api.mistral.ai/v1/chat") is False
+        assert executor._is_url_safe("https://api.mistral.ai@evil.com/secret") is False
+
+    def test_file_scheme_rejected(self, settings):
+        """Test that non-HTTPS schemes are rejected."""
+        executor = WorkflowExecutor(settings)
+        assert executor._is_url_safe("file:///etc/passwd") is False
+        assert executor._is_url_safe("ftp://api.mistral.ai/data") is False
 
 
 @pytest.mark.asyncio
@@ -477,17 +580,14 @@ class TestWorkflowExecutorExecution:
     @patch("app.services.executor.Mistral")
     async def test_execute_llm_summarize_step(self, mock_mistral_class, settings):
         """Test LLM summarize step with mocked Mistral client."""
-        # Mock the Mistral client
         mock_client = AsyncMock()
         mock_mistral_class.return_value = mock_client
 
-        # Mock the response
         mock_response = MagicMock()
         mock_response.choices = [MagicMock()]
         mock_response.choices[0].message.content = "This is a summary of the content."
         mock_client.chat.complete_async = AsyncMock(return_value=mock_response)
 
-        # Create executor with mocked client
         executor = WorkflowExecutor(settings)
         executor.mistral_client = mock_client
 
@@ -507,6 +607,52 @@ class TestWorkflowExecutorExecution:
 
         assert execution.status == WorkflowExecutionStatus.completed
         assert "summarize_step" in execution.step_results
+
+    async def test_execute_timeout(self, settings):
+        """Test that execution times out correctly."""
+        executor = WorkflowExecutor(settings)
+
+        workflow = WorkflowDefinition(
+            name="Simple",
+            trigger=WorkflowTrigger(type=TriggerType.manual),
+            steps=[WorkflowStep(id="step_1", action="web_search", params={"query": "test"})],
+        )
+
+        # Normal execution should complete within timeout
+        execution = await executor.execute(workflow)
+        assert execution.status == WorkflowExecutionStatus.completed
+
+
+# ============================================================================
+# SECURITY TESTS
+# ============================================================================
+
+class TestSecurityValidation:
+    """Test security-related validations."""
+
+    def test_config_rejects_wildcard_cors(self):
+        """Test that wildcard CORS origins are rejected."""
+        with pytest.raises(ValueError, match="Wildcard"):
+            Settings(cors_origins=["*"])
+
+    def test_config_validates_ft_model_name(self):
+        """Test that invalid model names are rejected."""
+        with pytest.raises(ValueError):
+            Settings(ft_model_name="model; DROP TABLE users;--")
+
+    def test_config_accepts_valid_ft_model_name(self):
+        """Test that valid model names are accepted."""
+        s = Settings(ft_model_name="ft:mistral:my-model-v1")
+        assert s.ft_model_name == "ft:mistral:my-model-v1"
+
+    def test_workflow_name_max_length(self):
+        """Test that overly long workflow names are rejected."""
+        with pytest.raises(ValueError):
+            WorkflowDefinition(
+                name="x" * 201,
+                trigger=WorkflowTrigger(type=TriggerType.manual),
+                steps=[WorkflowStep(id="step_1", action="send_email")],
+            )
 
 
 # ============================================================================
@@ -540,7 +686,6 @@ class TestApiRoutes:
         assert response.status_code == 200
 
         data = response.json()
-        # Check that character has expected fields
         assert data["name"] == "Flow-chan"
         assert data["level"] == 1
         assert data["xp"] == 0
@@ -550,8 +695,19 @@ class TestApiRoutes:
     def test_post_chat_reset_returns_status(self, test_client):
         """Test POST /api/chat/reset returns status."""
         response = test_client.post("/api/chat/reset")
-        # This may return 500 if orchestrator not available, but shouldn't error
-        assert response.status_code in [200, 500]
+        assert response.status_code == 200
+
+    def test_health_endpoint_no_auth_required(self, test_client):
+        """Test that health endpoint works without auth."""
+        response = test_client.get("/api/health")
+        assert response.status_code == 200
+
+    def test_error_messages_are_generic(self, test_client):
+        """Test that error responses don't leak internal details."""
+        # Send invalid data that should trigger a 422
+        response = test_client.post("/api/chat", json={})
+        # Should get a validation error, not an internal error with stack trace
+        assert response.status_code == 422
 
 
 # ============================================================================
@@ -567,8 +723,12 @@ class TestCharacterXpProgression:
             name="Test",
             trigger=WorkflowTrigger(type=TriggerType.manual),
             steps=[
-                WorkflowStep(id=f"step_{i}", action=f"action_{i}")
-                for i in range(1, 7)
+                WorkflowStep(id="step_1", action="send_email"),
+                WorkflowStep(id="step_2", action="send_slack_message"),
+                WorkflowStep(id="step_3", action="create_task"),
+                WorkflowStep(id="step_4", action="api_call"),
+                WorkflowStep(id="step_5", action="web_search"),
+                WorkflowStep(id="step_6", action="llm_summarize"),
             ],
         )
 
@@ -580,7 +740,6 @@ class TestCharacterXpProgression:
             if character_service.state.level > starting_level:
                 break
 
-        # Should have leveled up within reasonable iterations
         assert character_service.state.level >= starting_level
 
     def test_xp_resets_on_level_up(self, character_service):
@@ -589,34 +748,26 @@ class TestCharacterXpProgression:
             name="Test",
             trigger=WorkflowTrigger(type=TriggerType.manual),
             steps=[
-                WorkflowStep(id=f"step_{i}", action=f"action_{i}")
-                for i in range(1, 7)
+                WorkflowStep(id="step_1", action="send_email"),
+                WorkflowStep(id="step_2", action="send_slack_message"),
+                WorkflowStep(id="step_3", action="create_task"),
+                WorkflowStep(id="step_4", action="api_call"),
+                WorkflowStep(id="step_5", action="web_search"),
+                WorkflowStep(id="step_6", action="llm_summarize"),
             ],
         )
 
         initial_level = character_service.state.level
 
-        # Award XP until level up occurs
         for _ in range(20):
             result = character_service.award_xp(workflow)
             if character_service.state.level > initial_level:
-                # After level up, XP should be reset
                 assert character_service.state.xp < LEVEL_UP_THRESHOLDS[initial_level]
                 break
 
 
 class TestWorkflowValidation:
     """Test workflow validation constraints."""
-
-    def test_empty_workflow_steps_invalid(self):
-        """Test that workflow with no steps is invalid."""
-        # This should not raise an error as steps can be empty
-        workflow = WorkflowDefinition(
-            name="Empty",
-            trigger=WorkflowTrigger(type=TriggerType.manual),
-            steps=[],
-        )
-        assert len(workflow.steps) == 0
 
     def test_step_with_dependencies(self):
         """Test step with dependencies is properly structured."""

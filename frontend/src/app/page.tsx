@@ -257,8 +257,7 @@ export default function Home() {
             exit={{ height: 0, opacity: 0 }}
             className="bg-red-950/60 border-b border-red-800 text-red-300 text-xs px-5 py-2 text-center"
           >
-            Backend API unavailable at {process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000"}.
-            Start the FastAPI server to use KotoFlow.
+            Backend API is unavailable. Please ensure the server is running.
           </motion.div>
         )}
       </AnimatePresence>

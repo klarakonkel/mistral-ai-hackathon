@@ -1,0 +1,80 @@
+{
+    "workflow_id": "wf_20260228_001",
+    "name": "Forward invoices from suppliers to accounting folder",
+    "description": "When an email arrives from a known supplier, extract the invoice data and log it to the accounting spreadsheet, then send a confirmation.",
+    "created_from_transcript": true,
+  
+    "trigger": {
+      "type": "email_received",
+      "config": {
+        "from_filter": "invoices@supplier.com",
+        "subject_filter": "invoice",
+        "match": "contains"
+      }
+    },
+  
+    "steps": [
+      {
+        "id": "step_1",
+        "name": "Extract invoice details",
+        "action": "gmail.read_email",
+        "config": {
+          "extract_fields": ["sender", "subject", "body", "date"]
+        },
+        "output_variable": "email_data"
+      },
+      {
+        "id": "step_2",
+        "name": "Check if sender is approved supplier",
+        "action": "condition",
+        "config": {
+          "if": "{{email_data.sender}} contains 'supplier.com'",
+          "then": "step_3",
+          "else": "step_5"
+        }
+      },
+      {
+        "id": "step_3",
+        "name": "Log to accounting spreadsheet",
+        "action": "sheets.append_row",
+        "config": {
+          "spreadsheet_id": "{{user.spreadsheet_id}}",
+          "sheet_name": "Invoices",
+          "row_data": [
+            "{{email_data.date}}",
+            "{{email_data.sender}}",
+            "{{email_data.subject}}",
+            "{{workflow.run_timestamp}}"
+          ]
+        },
+        "output_variable": "sheet_result"
+      },
+      {
+        "id": "step_4",
+        "name": "Send confirmation email",
+        "action": "gmail.send_email",
+        "config": {
+          "to": "{{email_data.sender}}",
+          "subject": "Invoice received: {{email_data.subject}}",
+          "body": "Hi, we've received your invoice and logged it. Thank you."
+        }
+      },
+      {
+        "id": "step_5",
+        "name": "Flag unknown sender",
+        "action": "gmail.send_email",
+        "config": {
+          "to": "arlene@company.com",
+          "subject": "Unknown invoice sender: {{email_data.sender}}",
+          "body": "An invoice arrived from an unrecognized sender. Please review."
+        }
+      }
+    ],
+  
+    "meta": {
+      "estimated_time_saved_minutes": 8,
+      "runs": 0,
+      "last_run": null,
+      "status": "active"
+    }
+  }
